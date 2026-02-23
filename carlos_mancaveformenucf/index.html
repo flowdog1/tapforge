@@ -28,6 +28,7 @@
         padding: 1rem;
       }
       .card {
+        position: relative;
         width: 100%;
         max-width: 28rem;
         border: 1px solid #2a3869;
@@ -35,6 +36,7 @@
         background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
         backdrop-filter: blur(4px);
         padding: 1.25rem;
+        padding-top: 2.9rem;
         box-shadow: 0 20px 45px rgba(0, 0, 0, 0.38);
       }
       .badge {
@@ -79,10 +81,18 @@
       .btn-primary { background: linear-gradient(180deg, var(--primary-2), var(--primary)); color: #f8fbff; }
       .btn-secondary { background: var(--surface-2); color: var(--text); border-color: #2e3f75; }
       .btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+      .card-logo {
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
+        width: clamp(5rem, 22vw, 6.25rem);
+        height: auto;
+      }
     </style>
   </head>
   <body>
     <main class="card">
+      <img class="card-logo" src="/assets/logo.svg" alt="TapForge logo" />
       <span class="badge">NFC Profile</span>
       <h1 id="name">Loading...</h1>
       <h2 id="business">Loading business...</h2>
