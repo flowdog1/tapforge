@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{{NAME}} | NFC Card</title>
+    <title>NFC Card</title>
     <style>
       :root {
         color-scheme: dark;
@@ -33,7 +33,9 @@
         border: 1px solid #2a3869;
         border-radius: 1rem;
         background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+        backdrop-filter: blur(4px);
         padding: 1.25rem;
+        box-shadow: 0 20px 45px rgba(0, 0, 0, 0.38);
       }
       .badge {
         display: inline-block;
@@ -42,10 +44,11 @@
         background: rgba(95, 140, 255, 0.16);
         color: var(--primary-2);
         font-size: 0.75rem;
+        letter-spacing: 0.04em;
         text-transform: uppercase;
       }
-      h1 { margin: 0.75rem 0 0.25rem; font-size: 1.5rem; }
-      h2 { margin: 0; font-size: 1rem; color: var(--muted); font-weight: 500; }
+      h1 { font-size: 1.5rem; margin: 0.75rem 0 0.25rem; }
+      h2 { font-size: 1rem; margin: 0; color: var(--muted); font-weight: 500; }
       .info { margin-top: 1.1rem; display: grid; gap: 0.7rem; }
       .row {
         background: var(--surface);
@@ -58,8 +61,10 @@
         font-size: 0.75rem;
         color: var(--muted);
         margin-bottom: 0.2rem;
+        letter-spacing: 0.03em;
         text-transform: uppercase;
       }
+      .value { font-size: 0.95rem; word-break: break-word; }
       .actions { margin-top: 1.2rem; display: grid; gap: 0.65rem; }
       .btn {
         display: inline-flex;
@@ -69,38 +74,85 @@
         border-radius: 0.75rem;
         padding: 0.85rem 1rem;
         font-weight: 600;
+        border: 1px solid transparent;
       }
       .btn-primary { background: linear-gradient(180deg, var(--primary-2), var(--primary)); color: #f8fbff; }
-      .btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid #2e3f75; }
+      .btn-secondary { background: var(--surface-2); color: var(--text); border-color: #2e3f75; }
       .btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
     </style>
   </head>
   <body>
     <main class="card">
       <span class="badge">NFC Profile</span>
-      <h1>{{NAME}}</h1>
-      <h2>{{BUSINESS_NAME}}</h2>
+      <h1 id="name">Loading...</h1>
+      <h2 id="business">Loading business...</h2>
 
       <section class="info">
         <div class="row">
           <span class="label">Phone</span>
-          <span>{{PHONE_DISPLAY}}</span>
+          <span class="value" id="phone">Loading phone...</span>
         </div>
         <div class="row">
           <span class="label">Address</span>
-          <span>{{ADDRESS_SINGLE_LINE}}</span>
+          <span class="value" id="address">Loading address...</span>
         </div>
         <div class="row">
           <span class="label">Booking</span>
-          <span>{{BOOKING_URL}}</span>
+          <span class="value" id="booking">Loading booking URL...</span>
         </div>
       </section>
 
       <section class="actions">
         <a class="btn btn-primary" href="./contact.vcf">Add Contact</a>
-        <a class="btn btn-secondary" href="{{BOOKING_URL}}">Book Appointment</a>
-        <a class="btn btn-secondary" href="tel:{{PHONE_E164}}">Call</a>
+        <a class="btn btn-secondary" id="book-btn" href="#">Book Appointment</a>
+        <a class="btn btn-secondary" id="call-btn" href="#">Call</a>
       </section>
     </main>
+
+    <script>
+      function parseVcf(vcfText) {
+        const find = (prefix) => {
+          const line = vcfText.split(/\r?\n/).find((entry) => entry.startsWith(prefix));
+          return line ? line.slice(line.indexOf(":") + 1).trim() : "";
+        };
+
+        const fullName = find("FN:");
+        const organization = find("ORG:");
+        const phone = find("TEL") || find("TEL;TYPE=CELL");
+        const bookingUrl = find("URL:");
+        const addressRaw = find("ADR");
+        const adrParts = addressRaw.split(";");
+        const address = [adrParts[2], adrParts[3], adrParts[4], adrParts[5], adrParts[6]]
+          .filter(Boolean)
+          .join(", ");
+
+        return { fullName, organization, phone, bookingUrl, address };
+      }
+
+      async function hydrateFromVcf() {
+        try {
+          const response = await fetch("./contact.vcf", { cache: "no-store" });
+          if (!response.ok) throw new Error("Unable to load contact.vcf");
+
+          const vcfText = await response.text();
+          const profile = parseVcf(vcfText);
+
+          document.getElementById("name").textContent = profile.fullName || "Unknown Name";
+          document.getElementById("business").textContent = profile.organization || "Unknown Business";
+          document.getElementById("phone").textContent = profile.phone || "No phone found";
+          document.getElementById("address").textContent = profile.address || "No address found";
+          document.getElementById("booking").textContent = profile.bookingUrl || "No booking URL found";
+
+          document.getElementById("book-btn").href = profile.bookingUrl || "#";
+          document.getElementById("call-btn").href = profile.phone ? `tel:${profile.phone}` : "#";
+          document.title = profile.fullName ? `${profile.fullName} | NFC Card` : "NFC Card";
+        } catch (error) {
+          document.getElementById("name").textContent = "Could not load profile";
+          document.getElementById("business").textContent = "Please verify contact.vcf";
+        }
+      }
+
+      hydrateFromVcf();
+    </script>
   </body>
 </html>

@@ -40,13 +40,7 @@ Use `/template-client/` for any new client. Fields to update are clearly marked 
 cp -R template-client sofia
 ```
 
-3. Edit `sofia/index.html` and replace all placeholders:
-   - `{{NAME}}`
-   - `{{BUSINESS_NAME}}`
-   - `{{PHONE_DISPLAY}}`
-   - `{{PHONE_E164}}`
-   - `{{ADDRESS_SINGLE_LINE}}`
-   - `{{BOOKING_URL}}`
+3. Keep `sofia/index.html` as-is (it auto-loads data from `./contact.vcf`).
 
 4. Edit `sofia/contact.vcf` and replace all placeholders:
    - `{{NAME}}`
@@ -81,9 +75,10 @@ Example:
 cp -R template-client diego
 ```
 
-Then edit:
-- `<barber-slug>/index.html` with the barber's name, business name, display phone, address, booking URL, and `tel:` number.
+Then edit only:
 - `<barber-slug>/contact.vcf` with `FN`, `ORG`, `TEL`, `ADR`, and `URL`.
+
+`index.html` now reads the `.vcf` file automatically, so the page content and buttons stay in sync with your contact file.
 
 When deployed to Cloudflare Pages, the profile will be available at:
 - `https://<your-domain>/<barber-slug>/`
