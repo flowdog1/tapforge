@@ -33,7 +33,7 @@
       <section class="actions">
         <a class="btn btn-primary" href="./contact.vcf">Add Contact</a>
         <a class="btn btn-secondary" id="book-btn" href="#">Book Appointment</a>
-        <a class="btn btn-secondary" id="call-btn" href="#">Call</a>
+        <a class="btn btn-secondary" id="call-btn" href="#">Text</a>
       </section>
     </main>
 
@@ -72,7 +72,7 @@
           document.getElementById("booking").textContent = profile.bookingUrl || "No booking URL found";
 
           document.getElementById("book-btn").href = profile.bookingUrl || "#";
-          document.getElementById("call-btn").href = profile.phone ? `tel:${profile.phone}` : "#";
+          document.getElementById("call-btn").href = profile.phone ? `sms:${profile.phone}` : "#";
           document.title = profile.fullName ? `${profile.fullName} | NFC Card` : "NFC Card";
         } catch (error) {
           document.getElementById("name").textContent = "Could not load profile";

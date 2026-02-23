@@ -25,7 +25,7 @@ This repository is ready to deploy directly to Cloudflare Pages as static files.
 - modern plain HTML + CSS (no frameworks)
 - Add Contact button (`./contact.vcf`)
 - Book Appointment button
-- Call button
+- Text button
 
 ## Reusable template
 
