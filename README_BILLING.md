@@ -1,30 +1,40 @@
-# Billing Backend Foundations (Pass 1)
+# Billing Backend (Cloudflare Pages Functions + D1)
 
-This repository now includes backend scaffolding for Cloudflare Pages Functions and D1.
+This project now includes backend routes in `/functions/api` for checkout, webhook processing, and booking usage metering.
 
-## Required environment variables
+## Environment variables
 
-Set these variables in your Cloudflare Pages project:
+Set these in Cloudflare Pages project settings:
 
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `STRIPE_PRICE_ID_BOOKING`
 - `STRIPE_METER_EVENT_NAME`
+- `STRIPE_PRICE_ID_CARD_25`
+- `STRIPE_PRICE_ID_CARD_50`
+- `STRIPE_PRICE_ID_CARD_150`
+- `STRIPE_PRICE_ID_CARD_200`
+- `STRIPE_PRICE_ID_CARD_500`
+- `STRIPE_PRICE_ID_STAND`
 
-## Required D1 binding
+## D1 binding
 
-Bind your D1 database to Pages Functions with the binding name:
+Bind your D1 database as:
 
 - `DB`
 
-## One-booking-per-day rule
+Functions read it from `context.env.DB`.
 
-The `bookings` table has a composite unique constraint on `(card_id, booking_date)`.
+## One booking per card per day
 
-Conceptually, this means:
+The `bookings` table includes this constraint:
 
-- A single card can only have one booking record for the same date.
-- Attempting to insert another booking with the same `card_id` and `booking_date` will fail at the database level.
-- This guarantees the rule even if multiple requests race each other.
+- `UNIQUE(card_id, booking_date)`
 
-`booking_date` should be stored as `YYYY-MM-DD`, using a card timezone when available, otherwise UTC.
+That means only one row can exist for the same card on the same day. If a second insert is attempted, the DB rejects it and the API returns `409 Conflict`.
+
+## Routes
+
+- `POST /api/checkout` → creates Stripe Checkout session for a SKU.
+- `POST /api/webhook` → verifies Stripe signature and records event idempotently.
+- `POST /api/booking` → inserts one booking per card/day and emits a Stripe meter event.

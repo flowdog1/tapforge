@@ -27,14 +27,17 @@ export function createStripeClient(env) {
   const secretKey = requireSecretKey(env);
 
   async function request(path, payload = {}, options = {}) {
-    const response = await fetch(`${STRIPE_API_BASE}${path}`, {
-      method: options.method || 'POST',
+    const method = options.method || 'POST';
+    const query = method === 'GET' && payload ? `?${toFormBody(payload).toString()}` : '';
+
+    const response = await fetch(`${STRIPE_API_BASE}${path}${query}`, {
+      method,
       headers: {
         Authorization: `Bearer ${secretKey}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
+        ...(method !== 'GET' ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
         ...(options.headers || {}),
       },
-      body: options.method === 'GET' ? undefined : toFormBody(payload),
+      body: method === 'GET' ? undefined : toFormBody(payload),
     });
 
     const data = await response.json();
