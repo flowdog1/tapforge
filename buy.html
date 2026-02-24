@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TapForge Buy</title>
+    <style>
+      body { font-family: Arial, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+      h1 { margin-bottom: 1rem; }
+      .item { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; }
+      button { background: #111; color: #fff; border: 0; border-radius: 6px; padding: 0.5rem 0.75rem; cursor: pointer; }
+      #status { margin-top: 1rem; color: #a00; }
+    </style>
+  </head>
+  <body>
+    <h1>Buy TapForge Products</h1>
+    <div class="item"><strong>Card Pack (25)</strong> <button data-sku="card_25">Buy</button></div>
+    <div class="item"><strong>Card Pack (50)</strong> <button data-sku="card_50">Buy</button></div>
+    <div class="item"><strong>Card Pack (150)</strong> <button data-sku="card_150">Buy</button></div>
+    <div class="item"><strong>Card Pack (200)</strong> <button data-sku="card_200">Buy</button></div>
+    <div class="item"><strong>Card Pack (500)</strong> <button data-sku="card_500">Buy</button></div>
+    <div class="item"><strong>Tap Stand</strong> <button data-sku="stand">Buy</button></div>
+    <p id="status"></p>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      async function createCheckout(sku) {
+        statusEl.textContent = '';
+        try {
+          const response = await fetch('/api/checkout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sku, quantity: 1 }),
+          });
+
+          const data = await response.json();
+          if (!response.ok || !data.url) {
+            throw new Error(data.error || 'Checkout failed');
+          }
+
+          window.location.href = data.url;
+        } catch (err) {
+          statusEl.textContent = err.message || 'Checkout failed';
+        }
+      }
+
+      document.querySelectorAll('button[data-sku]').forEach((button) => {
+        button.addEventListener('click', () => createCheckout(button.dataset.sku));
+      });
+    </script>
+  </body>
+</html>
