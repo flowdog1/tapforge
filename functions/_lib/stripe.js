@@ -1,0 +1,48 @@
+/**
+ * Minimal Stripe API wrapper using fetch.
+ * Reads STRIPE_SECRET_KEY from Cloudflare env bindings.
+ */
+
+const STRIPE_API_BASE = 'https://api.stripe.com/v1';
+
+function requireSecretKey(env) {
+  const key = env?.STRIPE_SECRET_KEY;
+  if (!key) {
+    throw new Error('Missing STRIPE_SECRET_KEY');
+  }
+  return key;
+}
+
+function toFormBody(payload = {}) {
+  const body = new URLSearchParams();
+  for (const [key, value] of Object.entries(payload)) {
+    if (value !== undefined && value !== null) {
+      body.append(key, String(value));
+    }
+  }
+  return body;
+}
+
+export function createStripeClient(env) {
+  const secretKey = requireSecretKey(env);
+
+  async function request(path, payload = {}, options = {}) {
+    const response = await fetch(`${STRIPE_API_BASE}${path}`, {
+      method: options.method || 'POST',
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...(options.headers || {}),
+      },
+      body: options.method === 'GET' ? undefined : toFormBody(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data?.error?.message || 'Stripe request failed');
+    }
+    return data;
+  }
+
+  return { request };
+}
