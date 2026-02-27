@@ -58,7 +58,7 @@ export async function onRequestPost(context) {
   context.waitUntil(
     (async () => {
       try {
-        // Idempotency: record every event once
+        // idempotency
         await run(
           context.env,
           'INSERT OR IGNORE INTO billing_events (id, stripe_event_id, type) VALUES (?, ?, ?)',
@@ -70,9 +70,9 @@ export async function onRequestPost(context) {
           const customerEmail = session.customer_details?.email || null;
           const stripeCustomerId = session.customer || null;
 
-          // Only proceed if we have something useful
+          // Only proceed if we have at least something useful
           if (customerEmail || stripeCustomerId) {
-            // Prefer matching by email (most stable for your case)
+            // Prefer matching by email
             if (customerEmail) {
               await run(
                 context.env,
@@ -85,7 +85,7 @@ export async function onRequestPost(context) {
                 [crypto.randomUUID(), customerEmail, stripeCustomerId]
               );
             } else {
-              // Fallback: if no email (rare), insert by Stripe customer ID
+              // Fallback: insert by stripe_customer_id
               await run(
                 context.env,
                 `
