@@ -37,6 +37,7 @@ export async function onRequestPost(context) {
       'line_items[0][quantity]': quantity,
       success_url: `${origin}/buy.html?checkout=success`,
       cancel_url: `${origin}/buy.html?checkout=cancelled`,
+      customer_creation: "always",
       'metadata[sku]': sku,
     });
 
