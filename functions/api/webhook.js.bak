@@ -27,12 +27,7 @@ async function verifyStripeSignature(rawBody, signatureHeader, secret) {
     ['sign']
   );
 
-  const signature = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    new TextEncoder().encode(payload)
-  );
-
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
   const expected = Array.from(new Uint8Array(signature))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
@@ -58,7 +53,7 @@ export async function onRequestPost(context) {
   context.waitUntil(
     (async () => {
       try {
-        // Idempotency: record every event once
+        // idempotency
         await run(
           context.env,
           'INSERT OR IGNORE INTO billing_events (id, stripe_event_id, type) VALUES (?, ?, ?)',
@@ -67,35 +62,36 @@ export async function onRequestPost(context) {
 
         if (event.type === 'checkout.session.completed') {
           const session = event.data?.object || {};
-          const customerEmail = session.customer_details?.email || null;
+
+          // Prefer the richer customer_details.email when present
+          const email =
+            session.customer_details?.email ||
+            session.customer_email ||
+            null;
+
           const stripeCustomerId = session.customer || null;
 
-          // Only proceed if we have something useful
-          if (customerEmail || stripeCustomerId) {
-            // Prefer matching by email (most stable for your case)
-            if (customerEmail) {
-              await run(
-                context.env,
-                `
-                INSERT INTO customers (id, email, stripe_customer_id)
-                VALUES (?, ?, ?)
-                ON CONFLICT(email) DO UPDATE SET
-                  stripe_customer_id = COALESCE(excluded.stripe_customer_id, customers.stripe_customer_id)
-                `,
-                [crypto.randomUUID(), customerEmail, stripeCustomerId]
-              );
-            } else {
-              // Fallback: if no email (rare), insert by Stripe customer ID
-              await run(
-                context.env,
-                `
-                INSERT INTO customers (id, email, stripe_customer_id)
-                VALUES (?, ?, ?)
-                ON CONFLICT(stripe_customer_id) DO NOTHING
-                `,
-                [crypto.randomUUID(), null, stripeCustomerId]
-              );
-            }
+          // If we have an email, upsert by email so we can fill stripe_customer_id later
+          if (email) {
+            await run(
+              context.env,
+              `
+              INSERT INTO customers (id, email, stripe_customer_id)
+              VALUES (?, ?, ?)
+              ON CONFLICT(email) DO UPDATE SET
+                stripe_customer_id = COALESCE(customers.stripe_customer_id, excluded.stripe_customer_id)
+              `,
+              [crypto.randomUUID(), email, stripeCustomerId]
+            );
+          } else if (stripeCustomerId) {
+            // Edge case: no email, but we do have customer id.
+            // Since email is missing, we can't match existing rows reliably.
+            // Store it anyway (email will be NULL).
+            await run(
+              context.env,
+              'INSERT OR IGNORE INTO customers (id, email, stripe_customer_id) VALUES (?, ?, ?)',
+              [crypto.randomUUID(), null, stripeCustomerId]
+            );
           }
         }
       } catch (err) {
