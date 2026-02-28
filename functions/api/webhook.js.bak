@@ -1,4 +1,5 @@
 import { run } from '../_lib/db';
+import { createStripeClient } from '../_lib/stripe';
 import { error, json } from '../_lib/respond';
 
 function timingSafeEqual(a, b) {
@@ -27,7 +28,12 @@ async function verifyStripeSignature(rawBody, signatureHeader, secret) {
     ['sign']
   );
 
-  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(payload)
+  );
+
   const expected = Array.from(new Uint8Array(signature))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
@@ -50,52 +56,181 @@ export async function onRequestPost(context) {
     return error('Invalid webhook payload.', 400);
   }
 
+  // ✅ LIVE/TEST separation guard
+  const mode = (context.env.STRIPE_MODE || 'test').toLowerCase();
+  if (mode === 'live' && event.livemode === false) {
+    return error('Test event rejected in live mode.', 400);
+  }
+  if (mode === 'test' && event.livemode === true) {
+    return error('Live event rejected in test mode.', 400);
+  }
+
+  const stripe = createStripeClient(context.env);
+
   context.waitUntil(
     (async () => {
       try {
         // idempotency
-        await run(
+        const insertResult = await run(
           context.env,
           'INSERT OR IGNORE INTO billing_events (id, stripe_event_id, type) VALUES (?, ?, ?)',
           [crypto.randomUUID(), event.id || null, event.type || 'unknown']
         );
 
+        // If your run() returns changes, skip duplicates
+        if (insertResult?.changes === 0) return;
+
+        // --------------------------
+        // checkout.session.completed
+        // --------------------------
         if (event.type === 'checkout.session.completed') {
           const session = event.data?.object || {};
+          const sessionId = session.id;
+          if (!sessionId) return;
 
-          // Prefer the richer customer_details.email when present
-          const email =
-            session.customer_details?.email ||
-            session.customer_email ||
-            null;
+          // Get line items
+          const lineItems = await stripe.request(
+            `/checkout/sessions/${sessionId}/line_items`
+          );
 
+          // Session-level SKU is fine because your checkout only sells 1 SKU today
+          const items = (lineItems?.data || []).map((li) => ({
+            sku: session?.metadata?.sku || null,
+            quantity: li.quantity || 0,
+            price_id: li.price?.id || null,
+            product_id: li.price?.product || null,
+            unit_amount: li.price?.unit_amount ?? null,
+            currency: li.price?.currency || session.currency || null,
+          }));
+
+          const customerEmail = session.customer_details?.email || null;
           const stripeCustomerId = session.customer || null;
 
-          // If we have an email, upsert by email so we can fill stripe_customer_id later
-          if (email) {
-            await run(
-              context.env,
-              `
-              INSERT INTO customers (id, email, stripe_customer_id)
-              VALUES (?, ?, ?)
-              ON CONFLICT(email) DO UPDATE SET
-                stripe_customer_id = COALESCE(customers.stripe_customer_id, excluded.stripe_customer_id)
-              `,
-              [crypto.randomUUID(), email, stripeCustomerId]
-            );
-          } else if (stripeCustomerId) {
-            // Edge case: no email, but we do have customer id.
-            // Since email is missing, we can't match existing rows reliably.
-            // Store it anyway (email will be NULL).
-            await run(
-              context.env,
-              'INSERT OR IGNORE INTO customers (id, email, stripe_customer_id) VALUES (?, ?, ?)',
-              [crypto.randomUUID(), null, stripeCustomerId]
-            );
+          // Upsert customer (existing logic)
+          if (customerEmail || stripeCustomerId) {
+            if (customerEmail) {
+              await run(
+                context.env,
+                `
+                INSERT INTO customers (id, email, stripe_customer_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(email) DO UPDATE SET
+                  stripe_customer_id = COALESCE(excluded.stripe_customer_id, customers.stripe_customer_id)
+                `,
+                [crypto.randomUUID(), customerEmail, stripeCustomerId]
+              );
+            } else {
+              await run(
+                context.env,
+                `
+                INSERT INTO customers (id, email, stripe_customer_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(stripe_customer_id) DO NOTHING
+                `,
+                [crypto.randomUUID(), null, stripeCustomerId]
+              );
+            }
           }
+
+          // Insert/upsert order (PK = stripe_session_id)
+          await run(
+            context.env,
+            `
+            INSERT INTO orders (
+              stripe_session_id,
+              stripe_payment_intent_id,
+              stripe_customer_id,
+              status,
+              fulfillment_status,
+              currency,
+              amount_subtotal,
+              amount_total,
+              amount_tax,
+              amount_shipping,
+              customer_email,
+              items_json,
+              updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(stripe_session_id) DO UPDATE SET
+              stripe_payment_intent_id = COALESCE(excluded.stripe_payment_intent_id, orders.stripe_payment_intent_id),
+              stripe_customer_id = COALESCE(excluded.stripe_customer_id, orders.stripe_customer_id),
+              status = excluded.status,
+              currency = excluded.currency,
+              amount_subtotal = excluded.amount_subtotal,
+              amount_total = excluded.amount_total,
+              amount_tax = excluded.amount_tax,
+              amount_shipping = excluded.amount_shipping,
+              customer_email = COALESCE(excluded.customer_email, orders.customer_email),
+              items_json = excluded.items_json,
+              updated_at = CURRENT_TIMESTAMP
+            `,
+            [
+              sessionId,
+              session.payment_intent || null,
+              stripeCustomerId,
+              session.payment_status === 'paid' ? 'paid' : 'pending',
+              'unfulfilled',
+              session.currency || 'usd',
+              session.amount_subtotal ?? null,
+              session.amount_total ?? null,
+              session.total_details?.amount_tax ?? 0,
+              session.total_details?.amount_shipping ?? 0,
+              customerEmail,
+              JSON.stringify(items),
+            ]
+          );
+        }
+
+        // --------------------------
+        // payment_intent.succeeded
+        // --------------------------
+        if (event.type === 'payment_intent.succeeded') {
+          const pi = event.data?.object || {};
+          const piId = pi.id;
+          if (!piId) return;
+
+          await run(
+            context.env,
+            `
+            UPDATE orders
+            SET status = 'paid',
+                stripe_payment_intent_id = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE stripe_payment_intent_id = ?
+            `,
+            [piId, piId]
+          );
+        }
+
+        // --------------------------
+        // charge.refunded
+        // --------------------------
+        if (event.type === 'charge.refunded') {
+          const charge = event.data?.object || {};
+          const paymentIntentId = charge.payment_intent || null;
+          if (!paymentIntentId) return;
+
+          // Note: this marks refunded for partial OR full refunds (fine for v1)
+          await run(
+            context.env,
+            `
+            UPDATE orders
+            SET status = 'refunded',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE stripe_payment_intent_id = ?
+            `,
+            [paymentIntentId]
+          );
         }
       } catch (err) {
-        console.error('webhook async handler failed', err);
+        console.error('webhook async handler failed', {
+          message: err?.message,
+          status: err?.status,
+          type: err?.type,
+          body: err?.body,
+          raw: err,
+        });
       }
     })()
   );
