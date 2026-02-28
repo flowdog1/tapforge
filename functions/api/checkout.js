@@ -31,15 +31,17 @@ export async function onRequestPost(context) {
 
     const origin = new URL(context.request.url).origin;
     const stripe = createStripeClient(context.env);
+
     const session = await stripe.request('/checkout/sessions', {
       mode: 'payment',
       'line_items[0][price]': priceId,
       'line_items[0][quantity]': quantity,
       success_url: `${origin}/buy.html?checkout=success`,
       cancel_url: `${origin}/buy.html?checkout=cancelled`,
-      'customer_creation': 'always',
-      'customer_update[address]': 'auto',
-      'customer_update[name]': 'auto',
+
+      // This is what makes Stripe populate session.customer with cus_...
+      customer_creation: 'always',
+
       'metadata[sku]': sku,
     });
 
