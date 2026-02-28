@@ -14,6 +14,7 @@
       <span class="badge">NFC Profile</span>
       <h1 id="name">Loading...</h1>
       <h2 id="business">Loading business...</h2>
+      <p class="value" id="hours-inline" hidden style="color: var(--muted); margin: 0.25rem 0 0;"></p>
 
       <section class="info">
         <div class="row">
@@ -22,11 +23,19 @@
         </div>
         <div class="row">
           <span class="label">Address</span>
-          <span class="value" id="address">Loading address...</span>
+          <a class="value" id="address" href="#" target="_blank" rel="noopener noreferrer">Loading address...</a>
         </div>
         <div class="row">
           <span class="label">Booking</span>
-          <span class="value" id="booking">Loading booking URL...</span>
+          <a class="value" id="booking" href="#" target="_blank" rel="noopener noreferrer">Loading booking URL...</a>
+        </div>
+        <div class="row" id="social-row" hidden>
+          <span class="label">Social</span>
+          <a class="value" id="social" href="#" target="_blank" rel="noopener noreferrer">Social</a>
+        </div>
+        <div class="row" id="email-row" hidden>
+          <span class="label">Email</span>
+          <a class="value" id="email" href="#">Email</a>
         </div>
       </section>
 
@@ -39,22 +48,98 @@
 
     <script>
       function parseVcf(vcfText) {
-        const find = (prefix) => {
-          const line = vcfText.split(/\r?\n/).find((entry) => entry.startsWith(prefix));
-          return line ? line.slice(line.indexOf(":") + 1).trim() : "";
+        const singleLine = vcfText.replace(/\r?\n[ \t]/g, "").replace(/\r?\n/g, "\n");
+        const rawLines = singleLine
+          .split(/\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+
+        const lines =
+          rawLines.length > 2
+            ? rawLines
+            : singleLine
+                .replace(/^BEGIN:VCARD/i, "")
+                .replace(/END:VCARD$/i, "")
+                .split(/(?=[A-Z][A-Z0-9-]*(?:;[^:\n]*)?:)/)
+                .map((line) => line.trim())
+                .filter(Boolean);
+
+        const fields = new Map();
+        lines.forEach((line) => {
+          const firstColon = line.indexOf(":");
+          if (firstColon === -1) return;
+          const keyWithParams = line.slice(0, firstColon).trim();
+          const value = line.slice(firstColon + 1).trim();
+          const baseKey = keyWithParams.split(";")[0].toUpperCase();
+          if (!fields.has(baseKey)) fields.set(baseKey, []);
+          fields.get(baseKey).push({ keyWithParams, value });
+        });
+
+        const getFirst = (key) => (fields.get(key) || []).find((entry) => entry.value)?.value || "";
+        const getMatching = (key, matcher) =>
+          (fields.get(key) || []).find((entry) => matcher(entry.keyWithParams, entry.value))?.value || "";
+
+        const telEntries = fields.get("TEL") || [];
+        const preferredTel =
+          telEntries.find((entry) => /(?:^|;)TYPE=([^;]*,)?CELL(?:,|;|$)/i.test(entry.keyWithParams)) ||
+          telEntries[0];
+        const phone = preferredTel ? preferredTel.value : "";
+        const phoneDigits = phone.replace(/\D/g, "");
+
+        const formatPhone = (digits) => {
+          if (digits.length === 11 && digits.startsWith("1")) digits = digits.slice(1);
+          if (digits.length === 10) {
+            return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+          }
+          return phone;
         };
 
-        const fullName = find("FN:");
-        const organization = find("ORG:");
-        const phone = find("TEL") || find("TEL;TYPE=CELL");
-        const bookingUrl = find("URL:");
-        const addressRaw = find("ADR");
+        const fullName = getFirst("FN");
+        const organization = getFirst("ORG");
+        const bookingUrl =
+          getMatching("URL", (_key, value) => !/instagram\.com|facebook\.com|x\.com|twitter\.com|tiktok\.com|linkedin\.com|youtube\.com/i.test(value)) || getFirst("URL");
+        const addressRaw =
+          getMatching("ADR", (key) => /(?:^|;)TYPE=([^;]*,)?WORK(?:,|;|$)/i.test(key)) || getFirst("ADR");
         const adrParts = addressRaw.split(";");
         const address = [adrParts[2], adrParts[3], adrParts[4], adrParts[5], adrParts[6]]
           .filter(Boolean)
           .join(", ");
+        const mapsUrl = address
+          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+          : "";
 
-        return { fullName, organization, phone, bookingUrl, address };
+        const email = getFirst("EMAIL");
+        const socialUrl =
+          getFirst("X-SOCIALPROFILE") ||
+          getMatching("URL",
+            (_key, value) => /instagram\.com|facebook\.com|x\.com|twitter\.com|tiktok\.com|linkedin\.com|youtube\.com/i.test(value)
+          ) ||
+          getFirst("X-SOCIAL") ||
+          getFirst("X-INSTAGRAM");
+
+        const noteValue = getFirst("NOTE");
+        const hoursFromNote = /(hour|mon|tue|wed|thu|fri|sat|sun|am|pm)/i.test(noteValue) ? noteValue : "";
+        const hours = getFirst("X-BUSINESS-HOURS") || getFirst("X-HOURS") || hoursFromNote;
+
+        const normalizedSocialUrl = socialUrl
+          ? socialUrl.startsWith("http")
+            ? socialUrl
+            : `https://${socialUrl.replace(/^@/, "")}`
+          : "";
+
+        return {
+          fullName,
+          organization,
+          phone,
+          phoneDigits,
+          formattedPhone: formatPhone(phoneDigits),
+          bookingUrl,
+          address,
+          mapsUrl,
+          email,
+          socialUrl: normalizedSocialUrl,
+          hours,
+        };
       }
 
       async function hydrateFromVcf() {
@@ -67,12 +152,41 @@
 
           document.getElementById("name").textContent = profile.fullName || "Unknown Name";
           document.getElementById("business").textContent = profile.organization || "Unknown Business";
-          document.getElementById("phone").textContent = profile.phone || "No phone found";
-          document.getElementById("address").textContent = profile.address || "No address found";
-          document.getElementById("booking").textContent = profile.bookingUrl || "No booking URL found";
+          document.getElementById("phone").textContent = profile.formattedPhone || profile.phone || "No phone found";
+
+          const addressEl = document.getElementById("address");
+          addressEl.textContent = profile.address || "No address found";
+          addressEl.href = profile.mapsUrl || "#";
+
+          const bookingEl = document.getElementById("booking");
+          bookingEl.textContent = profile.bookingUrl || "No booking URL found";
+          bookingEl.href = profile.bookingUrl || "#";
+
+          const socialRow = document.getElementById("social-row");
+          const socialEl = document.getElementById("social");
+          if (profile.socialUrl) {
+            socialRow.hidden = false;
+            socialEl.href = profile.socialUrl;
+            socialEl.textContent = profile.socialUrl;
+          }
+
+          const emailRow = document.getElementById("email-row");
+          const emailEl = document.getElementById("email");
+          if (profile.email) {
+            const mailto = `mailto:${profile.email}`;
+            emailRow.hidden = false;
+            emailEl.href = mailto;
+            emailEl.textContent = profile.email;
+          }
+
+          const hoursInline = document.getElementById("hours-inline");
+          if (profile.hours) {
+            hoursInline.hidden = false;
+            hoursInline.textContent = profile.hours;
+          }
 
           document.getElementById("book-btn").href = profile.bookingUrl || "#";
-          document.getElementById("call-btn").href = profile.phone ? `sms:${profile.phone}` : "#";
+          document.getElementById("call-btn").href = profile.phoneDigits ? `sms:${profile.phoneDigits}` : "#";
           document.title = profile.fullName ? `${profile.fullName} | NFC Card` : "NFC Card";
         } catch (error) {
           document.getElementById("name").textContent = "Could not load profile";
