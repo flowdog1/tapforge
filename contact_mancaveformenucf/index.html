@@ -47,6 +47,49 @@
     </main>
 
     <script>
+      const SOCIAL_DOMAINS = new Set([
+        "instagram.com",
+        "facebook.com",
+        "x.com",
+        "twitter.com",
+        "tiktok.com",
+        "linkedin.com",
+        "youtube.com",
+      ]);
+
+      function safeUrl(raw) {
+        if (!raw) return null;
+
+        try {
+          return new URL(raw);
+        } catch (_error) {
+          try {
+            return new URL(`https://${raw}`);
+          } catch (_innerError) {
+            return null;
+          }
+        }
+      }
+
+      function prettyLinkText(raw) {
+        const parsedUrl = safeUrl(raw);
+        if (!parsedUrl) return raw || "";
+
+        const hostname = parsedUrl.hostname.replace(/^www\./i, "").toLowerCase();
+        const pathSegments = parsedUrl.pathname.split("/").filter(Boolean);
+
+        if (SOCIAL_DOMAINS.has(hostname)) {
+          const handle = pathSegments[0];
+          return handle ? `@${handle.replace(/^@/, "")}` : hostname;
+        }
+
+        if (!pathSegments.length) return hostname;
+
+        if (pathSegments.length === 1) return `${hostname}/${pathSegments[0]}`;
+
+        return `${hostname}/${pathSegments[pathSegments.length - 2]}/${pathSegments[pathSegments.length - 1]}`;
+      }
+
       function parseVcf(vcfText) {
         const singleLine = vcfText.replace(/\r?\n[ \t]/g, "").replace(/\r?\n/g, "\n");
         const rawLines = singleLine
@@ -159,15 +202,17 @@
           addressEl.href = profile.mapsUrl || "#";
 
           const bookingEl = document.getElementById("booking");
-          bookingEl.textContent = profile.bookingUrl || "No booking URL found";
+          bookingEl.textContent = profile.bookingUrl ? prettyLinkText(profile.bookingUrl) : "No booking URL found";
           bookingEl.href = profile.bookingUrl || "#";
+          bookingEl.title = profile.bookingUrl || "";
 
           const socialRow = document.getElementById("social-row");
           const socialEl = document.getElementById("social");
           if (profile.socialUrl) {
             socialRow.hidden = false;
             socialEl.href = profile.socialUrl;
-            socialEl.textContent = profile.socialUrl;
+            socialEl.textContent = prettyLinkText(profile.socialUrl);
+            socialEl.title = profile.socialUrl;
           }
 
           const emailRow = document.getElementById("email-row");
